@@ -1,0 +1,8 @@
+/deps/
+/_build/
+/demo/deps/
+/demo/_build/
+/demo/config/service-account.json
+/demo/erl_crash.dump
+gen_serverless-*.tar
+erl_crash.dump

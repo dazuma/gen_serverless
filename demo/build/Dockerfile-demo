@@ -1,0 +1,16 @@
+FROM genserverless-demo-builder-base
+WORKDIR /opt/app/demo
+COPY . /opt/app
+RUN mv /opt/base-app/demo/_build _build \
+    && mv /opt/base-app/demo/deps deps \
+    && mix compile
+RUN mix release genserverless_demo \
+    && mv _build/prod/rel/genserverless_demo /opt/release \
+    && mv /opt/release/bin/genserverless_demo /opt/release/bin/start_server
+
+FROM genserverless-demo-runtime-base
+ARG project_id
+ENV GOOGLE_CLOUD_PROJECT=${project_id}
+WORKDIR /opt/app
+COPY --from=0 /opt/release .
+CMD ["/opt/app/bin/start_server", "start"]

@@ -1,0 +1,6 @@
+indexes:
+
+- kind: Process
+  ancestor: yes
+  properties:
+  - name: class
