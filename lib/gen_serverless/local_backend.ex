@@ -64,10 +64,16 @@ defmodule GenServerless.LocalBackend do
   end
 
   defp post(body) do
-    url = Application.get_env(:gen_serverless, :backend_url, "http://127.0.0.1:4000/genserverless")
+    url =
+      Application.get_env(:gen_serverless, :backend_url, "http://127.0.0.1:4000/genserverless")
+
     url = String.to_charlist(url)
+
     :httpc.request(:post, {url, [], 'application/json', body}, [],
-                   [sync: false, receiver: fn(_) -> :ok end])
+      sync: false,
+      receiver: fn _ -> :ok end
+    )
+
     :ok
   end
 
@@ -98,14 +104,26 @@ defmodule GenServerless.LocalBackend do
     end
 
     def handle_call({:start, name, module, init_arg}, _from, servers) do
-      Logger.debug("[LocalBackend] handle_call start: name=#{inspect(name)} module=#{inspect(module)} init_arg=#{inspect(init_arg)}")
+      Logger.debug(
+        "[LocalBackend] handle_call start: name=#{inspect(name)} module=#{inspect(module)} init_arg=#{
+          inspect(init_arg)
+        }"
+      )
+
       case Map.fetch(servers, name) do
         {:ok, _val} ->
           Logger.warn("  [LocalBackend] handle_call start: Name exists")
           {:reply, {:error, :exists}, servers}
+
         :error ->
           cur_time = System.monotonic_time(:millisecond)
-          server_info = %ServerInfo{module: module, queue: [{:init, init_arg}], deadline: cur_time}
+
+          server_info = %ServerInfo{
+            module: module,
+            queue: [{:init, init_arg}],
+            deadline: cur_time
+          }
+
           servers = Map.put(servers, name, server_info)
           Logger.debug("  [LocalBackend] handle_call start: Added server")
           {:reply, :ok, servers}
@@ -113,7 +131,10 @@ defmodule GenServerless.LocalBackend do
     end
 
     def handle_call({:stop, name, reason}, _from, servers) do
-      Logger.debug("[LocalBackend] handle_call stop: name=#{inspect(name)} reason=#{inspect(reason)}")
+      Logger.debug(
+        "[LocalBackend] handle_call stop: name=#{inspect(name)} reason=#{inspect(reason)}"
+      )
+
       servers = Map.delete(servers, name)
       {:reply, :ok, servers}
     end
@@ -121,15 +142,19 @@ defmodule GenServerless.LocalBackend do
     def handle_call({:acquire_state, name, timeout}, _from, servers) do
       Logger.debug("[LocalBackend] handle_call acquire_event: name=#{inspect(name)}")
       cur_time = System.monotonic_time(:millisecond)
+
       case Map.fetch(servers, name) do
         {:ok, %ServerInfo{event: nil, queue: [{type, data} | queue]} = server_info} ->
           event_reply(servers, name, server_info, queue, type, data, cur_time + timeout)
+
         {:ok, %ServerInfo{event: nil}} ->
           Logger.debug("  [LocalBackend] handle_call acquire_event: empty")
           {:reply, {:ok, :empty}, servers}
+
         {:ok, %ServerInfo{}} ->
           Logger.debug("  [LocalBackend] handle_call acquire_event: busy")
           {:reply, {:ok, :busy}, servers}
+
         :error ->
           Logger.warn("  [LocalBackend] handle_call acquire_event: Name not found")
           {:reply, {:error, :notfound}, servers}
@@ -137,18 +162,35 @@ defmodule GenServerless.LocalBackend do
     end
 
     def handle_call({:acquire_state, name, ntype, ndata, timeout}, _from, servers) do
-      Logger.debug("[LocalBackend] handle_call acquire_state: name=#{inspect(name)} type=#{inspect(ntype)} data=#{inspect(ndata)}")
+      Logger.debug(
+        "[LocalBackend] handle_call acquire_state: name=#{inspect(name)} type=#{inspect(ntype)} data=#{
+          inspect(ndata)
+        }"
+      )
+
       cur_time = System.monotonic_time(:millisecond)
+
       case Map.fetch(servers, name) do
         {:ok, %ServerInfo{event: nil, queue: [{type, data} | queue]} = server_info} ->
-          event_reply(servers, name, server_info, queue ++ [{ntype, ndata}], type, data, cur_time + timeout)
+          event_reply(
+            servers,
+            name,
+            server_info,
+            queue ++ [{ntype, ndata}],
+            type,
+            data,
+            cur_time + timeout
+          )
+
         {:ok, %ServerInfo{event: nil, queue: queue} = server_info} ->
           event_reply(servers, name, server_info, queue, ntype, ndata, cur_time + timeout)
+
         {:ok, %ServerInfo{queue: queue} = server_info} ->
           server_info = %ServerInfo{server_info | queue: queue ++ [{ntype, ndata}]}
           servers = Map.put(servers, name, server_info)
           Logger.debug("  [LocalBackend] handle_call acquire_event: queued")
           {:reply, {:ok, :busy}, servers}
+
         :error ->
           Logger.warn("  [LocalBackend] handle_call acquire_state: Name not found")
           {:reply, {:error, :notfound}, servers}
@@ -156,27 +198,58 @@ defmodule GenServerless.LocalBackend do
     end
 
     def handle_call({:release_state, name, state, _backend_info}, _from, servers) do
-      Logger.debug("[LocalBackend] handle_call release_state: name=#{inspect(name)} state=#{inspect(state)}")
+      Logger.debug(
+        "[LocalBackend] handle_call release_state: name=#{inspect(name)} state=#{inspect(state)}"
+      )
+
       case Map.fetch(servers, name) do
         {:ok, %ServerInfo{event: event, queue: queue} = server_info} ->
           event_avail = !Enum.empty?(queue)
+
           if event == nil do
-            Logger.warn("  [LocalBackend] handle_call release_state: Unexpectedly not handling event")
+            Logger.warn(
+              "  [LocalBackend] handle_call release_state: Unexpectedly not handling event"
+            )
           else
-            Logger.debug("  [LocalBackend] handle_call release_state: State released, event_avail=#{event_avail}")
+            Logger.debug(
+              "  [LocalBackend] handle_call release_state: State released, event_avail=#{
+                event_avail
+              }"
+            )
           end
+
           server_info = %ServerInfo{server_info | state: state, event: nil}
           servers = Map.put(servers, name, server_info)
           {:reply, {:ok, event_avail}, servers}
+
         :error ->
           Logger.warn("  [LocalBackend] handle_call release_state: Name not found")
           {:reply, {:error, :notfound}, servers}
       end
     end
 
-    defp event_reply(servers, name, %ServerInfo{module: module, state: state} = server_info, nqueue, type, data, deadline) do
-      Logger.debug("  [LocalBackend] handle_call acquire_event: returning type=#{inspect(type)} data=#{inspect(data)} state=#{inspect(state)}")
-      server_info = %ServerInfo{server_info | queue: nqueue, event: {type, data}, deadline: deadline}
+    defp event_reply(
+           servers,
+           name,
+           %ServerInfo{module: module, state: state} = server_info,
+           nqueue,
+           type,
+           data,
+           deadline
+         ) do
+      Logger.debug(
+        "  [LocalBackend] handle_call acquire_event: returning type=#{inspect(type)} data=#{
+          inspect(data)
+        } state=#{inspect(state)}"
+      )
+
+      server_info = %ServerInfo{
+        server_info
+        | queue: nqueue,
+          event: {type, data},
+          deadline: deadline
+      }
+
       servers = Map.put(servers, name, server_info)
       {:reply, {:ok, type, data, module, state, nil}, servers}
     end

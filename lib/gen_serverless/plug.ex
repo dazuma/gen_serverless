@@ -3,11 +3,13 @@ defmodule GenServerless.Plug do
 
   alias GenServerless.Backend
 
-  plug Plug.Parsers,
+  plug(Plug.Parsers,
     parsers: [:json],
     pass: ["*/*"],
     json_decoder: Jason
-  plug :handle
+  )
+
+  plug(:handle)
 
   def handle(conn, _opts) do
     Backend.handle_params(conn.body_params)

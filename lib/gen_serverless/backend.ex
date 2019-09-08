@@ -1,5 +1,4 @@
 defmodule GenServerless.Backend do
-
   @timeout 60000
 
   @type event_type :: nil | :init | :cast | :stop
@@ -9,13 +8,20 @@ defmodule GenServerless.Backend do
 
   @callback stop_server(name :: String.t(), reason :: term()) :: :ok
 
-  @callback acquire_state(name :: String.t(), type :: event_type(), data :: term(), timeout :: non_neg_integer()) ::
-              {:ok, event_type :: event_type(), event_data :: term(), module :: module(), state :: term(), backend_info :: term()}
+  @callback acquire_state(
+              name :: String.t(),
+              type :: event_type(),
+              data :: term(),
+              timeout :: non_neg_integer()
+            ) ::
+              {:ok, event_type :: event_type(), event_data :: term(), module :: module(),
+               state :: term(), backend_info :: term()}
               | {:ok, :busy}
               | {:error, reason :: term()}
 
   @callback acquire_state(name :: String.t(), timeout :: non_neg_integer()) ::
-              {:ok, event_type :: event_type(), event_data :: term(), module :: module(), state :: term(), backend_info :: term()}
+              {:ok, event_type :: event_type(), event_data :: term(), module :: module(),
+               state :: term(), backend_info :: term()}
               | {:ok, :empty | :busy}
               | {:error, reason :: term()}
 
@@ -72,10 +78,17 @@ defmodule GenServerless.Backend do
     handle_event(name, [@timeout])
   end
 
-  def handle_params(%{"message" => %{"attributes" => %{"v" => "1", "e" => type, "n" => name}, "data" => data}}) when type == "cast" or type == "stop" do
+  def handle_params(%{
+        "message" => %{"attributes" => %{"v" => "1", "e" => type, "n" => name}, "data" => data}
+      })
+      when type == "cast" or type == "stop" do
     type = String.to_atom(type)
     data = data |> Base.decode64!() |> decode_term()
-    Logger.debug("[Backend] handle_params: name=#{inspect(name)} type=#{inspect(type)} data=#{inspect(data)}")
+
+    Logger.debug(
+      "[Backend] handle_params: name=#{inspect(name)} type=#{inspect(type)} data=#{inspect(data)}"
+    )
+
     handle_event(name, [type, data, @timeout])
   end
 
@@ -88,13 +101,17 @@ defmodule GenServerless.Backend do
     case backend_apply(:acquire_state, [name | acquire_args]) do
       {:ok, :init, init_arg, module, _state, backend_info} ->
         do_init(name, module, init_arg, backend_info)
+
       {:ok, :cast, msg, module, state, backend_info} ->
         do_cast(name, module, msg, state, backend_info)
+
       {:ok, :stop, reason, module, state, _backend_info} ->
         do_stop(name, module, reason, state)
+
       {:ok, result} ->
         Logger.debug("[Backend] handle_event: #{result}")
         :ok
+
       {:error, _reason} ->
         :ok
     end
@@ -102,9 +119,11 @@ defmodule GenServerless.Backend do
 
   defp do_init(name, module, init_arg, backend_info) do
     Logger.debug("[Backend] do_init: init_arg=#{inspect(init_arg)}")
+
     case apply(module, :init, [init_arg]) do
       {:ok, init_state} ->
         ready(name, init_state, backend_info)
+
       {:stop, reason} ->
         backend_apply(:stop_server, [name, reason])
         :ok
@@ -120,9 +139,11 @@ defmodule GenServerless.Backend do
 
   defp do_cast(name, module, msg, state, backend_info) do
     Logger.debug("[Backend] do_cast: msg=#{inspect(msg)} state=#{inspect(state)}")
+
     case apply(module, :handle_cast, [msg, state]) do
       {:noreply, new_state} ->
         ready(name, new_state, backend_info)
+
       {:stop, reason, new_state} ->
         do_stop(name, module, reason, new_state)
     end
@@ -133,8 +154,10 @@ defmodule GenServerless.Backend do
       {:ok, true} ->
         backend_apply(:post_ready, [name])
         :ok
+
       {:ok, false} ->
         :ok
+
       {:error, _reason} ->
         :ok
     end

@@ -18,7 +18,12 @@ defmodule Demo.Server do
   end
 
   def terminate(reason, %{acc: acc, count: count}) do
-    log("[DemoServer terminate] reason=#{inspect(reason)} final=#{inspect(acc)} count=#{inspect(count)}")
+    log(
+      "[DemoServer terminate] reason=#{inspect(reason)} final=#{inspect(acc)} count=#{
+        inspect(count)
+      }"
+    )
+
     :ok
   end
 end

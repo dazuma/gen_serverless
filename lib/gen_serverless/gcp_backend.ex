@@ -55,7 +55,12 @@ defmodule GenServerless.GcpBackend do
 
   @impl Backend
   def start_server(name, module, init_arg) do
-    Logger.debug("[GcpBackend] start_server: name=#{inspect(name)} module=#{inspect(module)} init_arg=#{inspect(init_arg)}")
+    Logger.debug(
+      "[GcpBackend] start_server: name=#{inspect(name)} module=#{inspect(module)} init_arg=#{
+        inspect(init_arg)
+      }"
+    )
+
     in_transaction(name, fn xact ->
       server = %ServerState{module: module}
       event = %ServerEvent{type: :init, data: init_arg}
@@ -69,6 +74,7 @@ defmodule GenServerless.GcpBackend do
       {:ok, :ok} ->
         Logger.debug("  [GcpBackend] start_server: Started")
         :ok
+
       {:error, error} ->
         Logger.warn("  [GcpBackend] start_server: Error: #{inspect(error)}")
         {:error, error}
@@ -78,11 +84,13 @@ defmodule GenServerless.GcpBackend do
   @impl Backend
   def stop_server(name, reason) do
     Logger.debug("[GcpBackend] stop_server: name=#{inspect(name)}, reason=#{inspect(reason)}")
+
     in_transaction(name, fn xact ->
       case fetch_server_queue_keys(xact) do
         {:ok, keys} ->
-          event_removals = Enum.map(keys, &(%DatastoreModel.Mutation{delete: &1}))
+          event_removals = Enum.map(keys, &%DatastoreModel.Mutation{delete: &1})
           {:ok, :ok, [%DatastoreModel.Mutation{delete: xact.key} | event_removals]}
+
         {:error, _} = error ->
           error
       end
@@ -91,6 +99,7 @@ defmodule GenServerless.GcpBackend do
       {:ok, :ok} ->
         Logger.debug("  [GcpBackend] stop_server: Stopped")
         :ok
+
       {:error, error} ->
         Logger.warn("  [GcpBackend] stop_server: Error: #{inspect(error)}")
         {:error, error}
@@ -101,30 +110,42 @@ defmodule GenServerless.GcpBackend do
   def acquire_state(name, timeout) do
     Logger.debug("[GcpBackend] acquire_state: name=#{inspect(name)}")
     cur_time = System.system_time(:millisecond)
+
     in_transaction(name, fn xact ->
       case fetch_server_info(xact) do
         {:ok, %ServerState{deadline: 0}, nil} ->
           Logger.debug("  [GcpBackend] acquire_state: Try empty")
           {:ok, :empty, []}
+
         {:ok, %ServerState{deadline: 0} = server, event} ->
           event_reply(xact, server, event, nil, cur_time + timeout)
+
         {:ok, %ServerState{}, _event} ->
           Logger.debug("  [GcpBackend] acquire_state: Try busy")
           {:ok, :busy, []}
+
         {:error, _} = error ->
           error
       end
     end)
     |> case do
       {:ok, {type, data, module, state, backend_info}} ->
-        Logger.debug("  [GcpBackend] acquire_state: Returning type=#{inspect(type)} data=#{inspect(data)} state=#{inspect(state)}")
+        Logger.debug(
+          "  [GcpBackend] acquire_state: Returning type=#{inspect(type)} data=#{inspect(data)} state=#{
+            inspect(state)
+          }"
+        )
+
         {:ok, type, data, module, state, backend_info}
+
       {:ok, :empty} ->
         Logger.debug("  [GcpBackend] acquire_state: Returning empty")
         {:ok, :busy}
+
       {:ok, :busy} ->
         Logger.debug("  [GcpBackend] acquire_state: Returning busy")
         {:ok, :busy}
+
       {:error, error} ->
         Logger.warn("  [GcpBackend] acquire_state: Error: #{inspect(error)}")
         {:error, error}
@@ -133,31 +154,47 @@ defmodule GenServerless.GcpBackend do
 
   @impl Backend
   def acquire_state(name, ntype, ndata, timeout) do
-    Logger.debug("[GcpBackend] acquire_state: name=#{inspect(name)} type=#{inspect(ntype)} data=#{inspect(ndata)}")
+    Logger.debug(
+      "[GcpBackend] acquire_state: name=#{inspect(name)} type=#{inspect(ntype)} data=#{
+        inspect(ndata)
+      }"
+    )
+
     cur_time = System.system_time(:millisecond)
     nevent = %ServerEvent{type: ntype, data: ndata}
+
     in_transaction(name, fn xact ->
       case fetch_server_info(xact) do
         {:ok, %ServerState{deadline: 0} = server, nil} ->
           event_reply(xact, server, nevent, nil, cur_time + timeout)
+
         {:ok, %ServerState{deadline: 0} = server, event} ->
           event_reply(xact, server, event, nevent, cur_time + timeout)
+
         {:ok, %ServerState{}, _event} ->
           Logger.debug("  [GcpBackend] acquire_state: Try queued")
           nevent_entity = event_to_entity(xact, nevent)
           nevent_mutation = %DatastoreModel.Mutation{insert: nevent_entity}
           {:ok, :busy, [nevent_mutation]}
+
         {:error, _} = error ->
           error
       end
     end)
     |> case do
       {:ok, {type, data, module, state, backend_info}} ->
-        Logger.debug("  [GcpBackend] acquire_state: Returning type=#{inspect(type)} data=#{inspect(data)} state=#{inspect(state)}")
+        Logger.debug(
+          "  [GcpBackend] acquire_state: Returning type=#{inspect(type)} data=#{inspect(data)} state=#{
+            inspect(state)
+          }"
+        )
+
         {:ok, type, data, module, state, backend_info}
+
       {:ok, :busy} ->
         Logger.debug("  [GcpBackend] acquire_state: Returning queued")
         {:ok, :busy}
+
       {:error, error} ->
         Logger.warn("  [GcpBackend] acquire_state: Error: #{inspect(error)}")
         {:error, error}
@@ -167,23 +204,32 @@ defmodule GenServerless.GcpBackend do
   @impl Backend
   def release_state(name, state, {event_id}) do
     Logger.debug("[GcpBackend] release_state: name=#{inspect(name)} state=#{inspect(state)}")
+
     in_transaction(name, fn xact ->
       case fetch_server_state(xact) do
         {:ok, %ServerState{} = server} ->
           case fetch_server_queue_keys(xact) do
             {:ok, keys} ->
-              event_avail = Enum.any?(keys, fn key ->
-                [_, %DatastoreModel.PathElement{id: id}] = key.path
-                String.to_integer(id) != event_id
-              end)
+              event_avail =
+                Enum.any?(keys, fn key ->
+                  [_, %DatastoreModel.PathElement{id: id}] = key.path
+                  String.to_integer(id) != event_id
+                end)
+
               if server.deadline == 0 do
                 Logger.warn("  [GcpBackend] release_state: Unexpectedly not handling event")
               else
-                Logger.debug("  [GcpBackend] release_state: Try returning state with event_avail=#{event_avail}")
+                Logger.debug(
+                  "  [GcpBackend] release_state: Try returning state with event_avail=#{
+                    event_avail
+                  }"
+                )
               end
+
               server = %ServerState{server | deadline: 0, state: state}
               server_entity = server_to_entity(xact, server)
               server_mutation = %DatastoreModel.Mutation{update: server_entity}
+
               mutations =
                 if event_id == nil do
                   [server_mutation]
@@ -192,10 +238,13 @@ defmodule GenServerless.GcpBackend do
                   event_mutation = %DatastoreModel.Mutation{delete: key}
                   [server_mutation, event_mutation]
                 end
+
               {:ok, event_avail, mutations}
+
             {:error, _} = error ->
               error
           end
+
         {:error, _} = error ->
           error
       end
@@ -204,6 +253,7 @@ defmodule GenServerless.GcpBackend do
       {:ok, event_avail} ->
         Logger.debug("  [GcpBackend] release_state: State released, event_avail=#{event_avail}")
         {:ok, event_avail}
+
       {:error, error} ->
         Logger.warn("  [GcpBackend] release_state: Error: #{inspect(error)}")
         {:error, error}
@@ -243,10 +293,16 @@ defmodule GenServerless.GcpBackend do
   end
 
   defp event_reply(xact, server, ret_event, queue_event, deadline) do
-    Logger.debug("  [GcpBackend] acquire_event: Try returning type=#{inspect(ret_event.type)} data=#{inspect(ret_event.data)} state=#{inspect(server.state)}")
+    Logger.debug(
+      "  [GcpBackend] acquire_event: Try returning type=#{inspect(ret_event.type)} data=#{
+        inspect(ret_event.data)
+      } state=#{inspect(server.state)}"
+    )
+
     server = %ServerState{server | deadline: deadline}
     server_entity = server_to_entity(xact, server)
     server_mutation = %DatastoreModel.Mutation{update: server_entity}
+
     mutations =
       if queue_event == nil do
         [server_mutation]
@@ -255,22 +311,29 @@ defmodule GenServerless.GcpBackend do
         event_mutation = %DatastoreModel.Mutation{insert: event_entity}
         [server_mutation, event_mutation]
       end
-    {:ok, {ret_event.type, ret_event.data, server.module, server.state, {ret_event.id}}, mutations}
+
+    {:ok, {ret_event.type, ret_event.data, server.module, server.state, {ret_event.id}},
+     mutations}
   end
 
   defp fetch_server_state(xact) do
     Logger.debug("  [GcpBackend] Querying server state")
+
     request = %DatastoreModel.LookupRequest{
       keys: [xact.key],
       readOptions: %DatastoreModel.ReadOptions{transaction: xact.transaction}
     }
+
     case DatastoreService.datastore_projects_lookup(xact.connection, xact.project, body: request) do
       {:ok, %DatastoreModel.LookupResponse{found: [%DatastoreModel.EntityResult{entity: entity}]}} ->
         {:ok, entity_to_server(entity)}
+
       {:ok, %DatastoreModel.LookupResponse{missing: [_result]}} ->
         {:error, :notfound}
+
       {:ok, response} ->
         {:error, {:unknown_response, response}}
+
       {:error, _} = error_response ->
         error_response
     end
@@ -278,6 +341,7 @@ defmodule GenServerless.GcpBackend do
 
   defp fetch_server_info(xact) do
     Logger.debug("  [GcpBackend] Querying full server info")
+
     request = %DatastoreModel.RunQueryRequest{
       partitionId: xact.key.partitionId,
       query: %DatastoreModel.Query{
@@ -293,17 +357,30 @@ defmodule GenServerless.GcpBackend do
       },
       readOptions: %DatastoreModel.ReadOptions{transaction: xact.transaction}
     }
-    case DatastoreService.datastore_projects_run_query(xact.connection, xact.project, body: request) do
-      {:ok, %DatastoreModel.RunQueryResponse{batch: %DatastoreModel.QueryResultBatch{entityResults: nil}}} ->
+
+    case DatastoreService.datastore_projects_run_query(xact.connection, xact.project,
+           body: request
+         ) do
+      {:ok,
+       %DatastoreModel.RunQueryResponse{
+         batch: %DatastoreModel.QueryResultBatch{entityResults: nil}
+       }} ->
         {:error, :notfound}
-      {:ok, %DatastoreModel.RunQueryResponse{batch: %DatastoreModel.QueryResultBatch{entityResults: results}}} ->
+
+      {:ok,
+       %DatastoreModel.RunQueryResponse{
+         batch: %DatastoreModel.QueryResultBatch{entityResults: results}
+       }} ->
         {server, event} =
           results
-          |> Enum.map(&(&1.entity))
+          |> Enum.map(& &1.entity)
           |> interpret_entities(nil, nil)
+
         {:ok, server, event}
+
       {:ok, response} ->
         {:error, {:unknown_response, response}}
+
       {:error, _} = error_response ->
         error_response
     end
@@ -311,6 +388,7 @@ defmodule GenServerless.GcpBackend do
 
   defp fetch_server_queue_keys(xact) do
     Logger.debug("  [GcpBackend] Querying server queue keys")
+
     request = %DatastoreModel.RunQueryRequest{
       partitionId: xact.key.partitionId,
       query: %DatastoreModel.Query{
@@ -328,22 +406,38 @@ defmodule GenServerless.GcpBackend do
       },
       readOptions: %DatastoreModel.ReadOptions{transaction: xact.transaction}
     }
-    case DatastoreService.datastore_projects_run_query(xact.connection, xact.project, body: request) do
-      {:ok, %DatastoreModel.RunQueryResponse{batch: %DatastoreModel.QueryResultBatch{entityResults: nil}}} ->
+
+    case DatastoreService.datastore_projects_run_query(xact.connection, xact.project,
+           body: request
+         ) do
+      {:ok,
+       %DatastoreModel.RunQueryResponse{
+         batch: %DatastoreModel.QueryResultBatch{entityResults: nil}
+       }} ->
         {:error, :notfound}
-      {:ok, %DatastoreModel.RunQueryResponse{batch: %DatastoreModel.QueryResultBatch{entityResults: results}}} ->
+
+      {:ok,
+       %DatastoreModel.RunQueryResponse{
+         batch: %DatastoreModel.QueryResultBatch{entityResults: results}
+       }} ->
         keys =
           Enum.flat_map(results, fn result ->
             key = result.entity.key
+
             case key.path do
               [_, %DatastoreModel.PathElement{id: id}] when is_binary(id) ->
                 [key]
-              _ -> []
+
+              _ ->
+                []
             end
           end)
+
         {:ok, keys}
+
       {:ok, response} ->
         {:error, {:unknown_response, response}}
+
       {:error, _} = error_response ->
         error_response
     end
@@ -351,19 +445,55 @@ defmodule GenServerless.GcpBackend do
 
   defp interpret_entities([], server, event), do: {server, event}
 
-  defp interpret_entities([%DatastoreModel.Entity{properties: %{"class" => %DatastoreModel.Value{stringValue: "state"}}} = entity | entities], _, event) do
+  defp interpret_entities(
+         [
+           %DatastoreModel.Entity{
+             properties: %{"class" => %DatastoreModel.Value{stringValue: "state"}}
+           } = entity
+           | entities
+         ],
+         _,
+         event
+       ) do
     interpret_entities(entities, entity_to_server(entity), event)
   end
 
-  defp interpret_entities([%DatastoreModel.Entity{properties: %{"class" => %DatastoreModel.Value{stringValue: "init"}}} = entity | entities], server, _) do
+  defp interpret_entities(
+         [
+           %DatastoreModel.Entity{
+             properties: %{"class" => %DatastoreModel.Value{stringValue: "init"}}
+           } = entity
+           | entities
+         ],
+         server,
+         _
+       ) do
     interpret_entities(entities, server, entity_to_event(entity))
   end
 
-  defp interpret_entities([%DatastoreModel.Entity{properties: %{"class" => %DatastoreModel.Value{stringValue: "event"}}} = entity | entities], server, nil) do
+  defp interpret_entities(
+         [
+           %DatastoreModel.Entity{
+             properties: %{"class" => %DatastoreModel.Value{stringValue: "event"}}
+           } = entity
+           | entities
+         ],
+         server,
+         nil
+       ) do
     interpret_entities(entities, server, entity_to_event(entity))
   end
 
-  defp interpret_entities([%DatastoreModel.Entity{properties: %{"class" => %DatastoreModel.Value{stringValue: "event"}}} | entities], server, event) do
+  defp interpret_entities(
+         [
+           %DatastoreModel.Entity{
+             properties: %{"class" => %DatastoreModel.Value{stringValue: "event"}}
+           }
+           | entities
+         ],
+         server,
+         event
+       ) do
     interpret_entities(entities, server, event)
   end
 
@@ -387,49 +517,81 @@ defmodule GenServerless.GcpBackend do
     transaction_loop(xact, func, {:error, :noretries})
   end
 
-  defp transaction_loop(%TransactionInfo{retries: retries, transaction: prev_transaction} = xact, func, _) when retries > 0 do
-    Logger.debug("  [GcpBackend] Starting transaction attempt: retries=#{inspect(retries)} prev=#{inspect(prev_transaction)}")
+  defp transaction_loop(
+         %TransactionInfo{retries: retries, transaction: prev_transaction} = xact,
+         func,
+         _
+       )
+       when retries > 0 do
+    Logger.debug(
+      "  [GcpBackend] Starting transaction attempt: retries=#{inspect(retries)} prev=#{
+        inspect(prev_transaction)
+      }"
+    )
+
     read_write = %DatastoreModel.ReadWrite{previousTransaction: prev_transaction}
     transaction_options = %DatastoreModel.TransactionOptions{readWrite: read_write}
     request = %DatastoreModel.BeginTransactionRequest{transactionOptions: transaction_options}
-    case DatastoreService.datastore_projects_begin_transaction(xact.connection, xact.project, body: request) do
+
+    case DatastoreService.datastore_projects_begin_transaction(xact.connection, xact.project,
+           body: request
+         ) do
       {:ok, %DatastoreModel.BeginTransactionResponse{transaction: transaction}} ->
         Logger.debug("  [GcpBackend] Got a transaction: #{inspect(transaction)}")
         xact = %TransactionInfo{xact | transaction: transaction, retries: retries - 1}
+
         case func.(xact) do
           {:ok, response, []} ->
             Logger.debug("  [GcpBackend] No mutations to commit: #{inspect(response)}")
             transaction_rollback(xact)
             {:ok, response}
+
           {:ok, response, mutations} ->
-            request = %DatastoreModel.CommitRequest{mutations: mutations, transaction: transaction}
-            Logger.debug("  [GcpBackend] Committing mutations: transaction=#{inspect(transaction)} mutations=#{inspect(mutations)}")
-            case DatastoreService.datastore_projects_commit(xact.connection, xact.project, body: request) do
+            request = %DatastoreModel.CommitRequest{
+              mutations: mutations,
+              transaction: transaction
+            }
+
+            Logger.debug(
+              "  [GcpBackend] Committing mutations: transaction=#{inspect(transaction)} mutations=#{
+                inspect(mutations)
+              }"
+            )
+
+            case DatastoreService.datastore_projects_commit(xact.connection, xact.project,
+                   body: request
+                 ) do
               {:ok, _} ->
                 Logger.debug("  [GcpBackend] Commit ok: #{inspect(response)}")
                 {:ok, response}
+
               {:error, %Tesla.Env{body: error_message}} = error ->
                 case Jason.decode(error_message) do
                   {:ok, %{"error" => %{"status" => "ABORTED"}}} ->
                     Logger.debug("  [GcpBackend] Retrying transaction: #{inspect(transaction)}")
                     rand_delay()
                     transaction_loop(xact, func, error)
+
                   _ ->
                     Logger.warn("  [GcpBackend] Commit failed: #{inspect(error)}")
                     transaction_rollback(xact)
                     error
                 end
+
               {:error, _} = error ->
                 Logger.warn("  [GcpBackend] Commit failed: #{inspect(error)}")
                 transaction_rollback(xact)
                 error
             end
+
           {:error, _} = error ->
             transaction_rollback(xact)
             error
         end
+
       {:ok, response} ->
         {:error, {:unknown_response, response}}
+
       {:error, _} = error_response ->
         Logger.warn("  [GcpBackend] Failed to get a transaction")
         error_response
@@ -453,45 +615,78 @@ defmodule GenServerless.GcpBackend do
     DatastoreService.datastore_projects_rollback(xact.connection, xact.project, body: request)
   end
 
-  defp entity_to_server(%DatastoreModel.Entity{properties: %{
-        "module" => %DatastoreModel.Value{stringValue: module},
-        "data" => %DatastoreModel.Value{stringValue: state},
-        "deadline" => %DatastoreModel.Value{integerValue: deadline}}}) do
-    %ServerState{module: String.to_existing_atom(module),
+  defp entity_to_server(%DatastoreModel.Entity{
+         properties: %{
+           "module" => %DatastoreModel.Value{stringValue: module},
+           "data" => %DatastoreModel.Value{stringValue: state},
+           "deadline" => %DatastoreModel.Value{integerValue: deadline}
+         }
+       }) do
+    %ServerState{
+      module: String.to_existing_atom(module),
       state: Backend.decode_term(state),
-      deadline: String.to_integer(deadline)}
+      deadline: String.to_integer(deadline)
+    }
   end
 
   defp entity_to_event(%DatastoreModel.Entity{
-      key: %DatastoreModel.Key{
-        path: [_, %DatastoreModel.PathElement{id: id}]
-      },
-      properties: %{
-        "type" => %DatastoreModel.Value{stringValue: type},
-        "data" => %DatastoreModel.Value{stringValue: data}
-      }}) do
+         key: %DatastoreModel.Key{
+           path: [_, %DatastoreModel.PathElement{id: id}]
+         },
+         properties: %{
+           "type" => %DatastoreModel.Value{stringValue: type},
+           "data" => %DatastoreModel.Value{stringValue: data}
+         }
+       }) do
     %ServerEvent{
       id: String.to_integer(id),
       type: String.to_existing_atom(type),
-      data: Backend.decode_term(data)}
+      data: Backend.decode_term(data)
+    }
   end
 
   defp server_to_entity(xact, server) do
     class = %DatastoreModel.Value{stringValue: "state"}
-    module = %DatastoreModel.Value{stringValue: Atom.to_string(server.module), excludeFromIndexes: true}
-    state = %DatastoreModel.Value{stringValue: Backend.encode_term(server.state), excludeFromIndexes: true}
-    deadline = %DatastoreModel.Value{integerValue: Integer.to_string(server.deadline), excludeFromIndexes: true}
-    %DatastoreModel.Entity{key: xact.key,
-      properties: %{"class" => class, "module" => module, "data" => state, "deadline" => deadline}}
+
+    module = %DatastoreModel.Value{
+      stringValue: Atom.to_string(server.module),
+      excludeFromIndexes: true
+    }
+
+    state = %DatastoreModel.Value{
+      stringValue: Backend.encode_term(server.state),
+      excludeFromIndexes: true
+    }
+
+    deadline = %DatastoreModel.Value{
+      integerValue: Integer.to_string(server.deadline),
+      excludeFromIndexes: true
+    }
+
+    %DatastoreModel.Entity{
+      key: xact.key,
+      properties: %{"class" => class, "module" => module, "data" => state, "deadline" => deadline}
+    }
   end
 
   defp event_to_entity(xact, event) do
     class = if event.type == :init, do: "init", else: "event"
     class = %DatastoreModel.Value{stringValue: class}
-    type = %DatastoreModel.Value{stringValue: Atom.to_string(event.type), excludeFromIndexes: true}
-    data = %DatastoreModel.Value{stringValue: Backend.encode_term(event.data), excludeFromIndexes: true}
-    %DatastoreModel.Entity{key: make_event_key(xact, nil),
-      properties: %{"class" => class, "type" => type, "data" => data}}
+
+    type = %DatastoreModel.Value{
+      stringValue: Atom.to_string(event.type),
+      excludeFromIndexes: true
+    }
+
+    data = %DatastoreModel.Value{
+      stringValue: Backend.encode_term(event.data),
+      excludeFromIndexes: true
+    }
+
+    %DatastoreModel.Entity{
+      key: make_event_key(xact, nil),
+      properties: %{"class" => class, "type" => type, "data" => data}
+    }
   end
 
   defp get_token(scopes) do
@@ -499,6 +694,7 @@ defmodule GenServerless.GcpBackend do
       scopes
       |> Enum.join(" ")
       |> Goth.Token.for_scope(nil)
+
     token.token
   end
 

@@ -23,19 +23,31 @@ defmodule Demo.LogStreamer do
     {:ok, %{project: project, connection: conn, subscription: subscription}, {:continue, :poll}}
   end
 
-  def handle_continue(:poll, %{project: project, connection: conn, subscription: subscription} = state) do
+  def handle_continue(
+        :poll,
+        %{project: project, connection: conn, subscription: subscription} = state
+      ) do
     request = %PubSubModel.PullRequest{returnImmediately: false, maxMessages: 10}
-    {:ok, response} = PubSubService.pubsub_projects_subscriptions_pull(conn, project, subscription, body: request)
+
+    {:ok, response} =
+      PubSubService.pubsub_projects_subscriptions_pull(conn, project, subscription, body: request)
+
     messages = response.receivedMessages
+
     if messages != nil && messages != [] do
-      ack_request = %PubSubModel.AcknowledgeRequest{ackIds: Enum.map(messages, &(&1.ackId))}
-      PubSubService.pubsub_projects_subscriptions_acknowledge(conn, project, subscription, body: ack_request)
+      ack_request = %PubSubModel.AcknowledgeRequest{ackIds: Enum.map(messages, & &1.ackId)}
+
+      PubSubService.pubsub_projects_subscriptions_acknowledge(conn, project, subscription,
+        body: ack_request
+      )
+
       Enum.each(messages, fn m ->
         m.message.data
         |> Base.decode64!()
         |> IO.puts()
       end)
     end
+
     {:noreply, state, {:continue, :poll}}
   end
 
@@ -46,6 +58,7 @@ defmodule Demo.LogStreamer do
       scopes
       |> Enum.join(" ")
       |> Goth.Token.for_scope(nil)
+
     token.token
   end
 end

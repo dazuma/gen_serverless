@@ -47,11 +47,14 @@ defmodule GenServerless do
         {nil, _opts} -> generate_name()
         {name, _opts} when is_atom(name) -> name
       end
+
     case Backend.backend_apply(:start_server, [name, module, init_arg]) do
       :ok ->
         Backend.backend_apply(:post_ready, [name])
         {:ok, name}
-      error -> error
+
+      error ->
+        error
     end
   end
 
